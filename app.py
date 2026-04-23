@@ -198,8 +198,29 @@ def analizar_columnas(columnas_archivo, columnas_esperadas):
     return faltantes, extras, mismo_orden, diferencias_orden
 
 
+def generar_motivo_invalidez(faltantes, extras, mismo_orden, diferencias_orden, cantidad_ok):
+    motivos = []
+
+    if not cantidad_ok:
+        motivos.append("Cantidad de columnas incorrecta")
+
+    if faltantes:
+        motivos.append(f"Faltan {len(faltantes)} columna(s)")
+
+    if extras:
+        motivos.append(f"Hay {len(extras)} columna(s) adicional(es)")
+
+    if not mismo_orden:
+        motivos.append(f"Orden incorrecto en {len(diferencias_orden)} posición(es)")
+
+    if not motivos:
+        return "Archivo válido"
+
+    return " | ".join(motivos)
+
+
 def leer_excel_subido(uploaded_file, sheet_option):
-    if sheet_option == "Primera hoja":
+    if sheet_option == "Primera hoja" or sheet_option == 0:
         return pd.read_excel(uploaded_file, sheet_name=0, dtype=object)
     return pd.read_excel(uploaded_file, sheet_name=sheet_option, dtype=object)
 
@@ -218,11 +239,20 @@ def validar_archivo(uploaded_file, sheet_option):
         nombres_ok = len(faltantes) == 0 and len(extras) == 0
         valido = cantidad_ok and nombres_ok and mismo_orden
 
+        motivo = generar_motivo_invalidez(
+            faltantes,
+            extras,
+            mismo_orden,
+            diferencias_orden,
+            cantidad_ok
+        )
+
         df.columns = columnas_archivo
 
         return {
             "archivo": uploaded_file.name,
             "valido": valido,
+            "motivo": motivo,
             "cantidad_archivo": len(columnas_archivo),
             "cantidad_esperada": len(columnas_esperadas),
             "faltantes": faltantes,
@@ -236,6 +266,7 @@ def validar_archivo(uploaded_file, sheet_option):
         return {
             "archivo": uploaded_file.name,
             "valido": False,
+            "motivo": f"Error al leer archivo: {str(e)}",
             "cantidad_archivo": None,
             "cantidad_esperada": len(COLUMNAS_ESPERADAS),
             "faltantes": [],
@@ -264,6 +295,7 @@ def construir_reporte(resultados):
         resumen.append({
             "Archivo": r["archivo"],
             "Válido": "Sí" if r["valido"] else "No",
+            "Motivo": r.get("motivo", ""),
             "Cantidad columnas archivo": r["cantidad_archivo"],
             "Cantidad columnas esperadas": r["cantidad_esperada"],
             "Mismo orden": "Sí" if r["mismo_orden"] else "No",
@@ -273,17 +305,32 @@ def construir_reporte(resultados):
         })
 
         for c in r["faltantes"]:
-            detalle.append({"Archivo": r["archivo"], "Tipo": "Faltante", "Detalle": c})
+            detalle.append({
+                "Archivo": r["archivo"],
+                "Tipo": "Faltante",
+                "Detalle": c
+            })
+
         for c in r["extras"]:
-            detalle.append({"Archivo": r["archivo"], "Tipo": "Extra", "Detalle": c})
+            detalle.append({
+                "Archivo": r["archivo"],
+                "Tipo": "Extra",
+                "Detalle": c
+            })
+
         for d in r["diferencias_orden"]:
             detalle.append({
                 "Archivo": r["archivo"],
                 "Tipo": "Orden incorrecto",
                 "Detalle": f"Posición {d['Posición']}: esperado='{d['Esperado']}' | encontrado='{d['Encontrado']}'",
             })
+
         if r["error"]:
-            detalle.append({"Archivo": r["archivo"], "Tipo": "Error lectura", "Detalle": r["error"]})
+            detalle.append({
+                "Archivo": r["archivo"],
+                "Tipo": "Error lectura",
+                "Detalle": r["error"]
+            })
 
     df_resumen = pd.DataFrame(resumen)
     df_detalle = pd.DataFrame(detalle)
@@ -314,7 +361,7 @@ with st.expander("Ver reglas de validación"):
     st.write("- Se valida cantidad de columnas.")
     st.write("- Se validan nombres exactos de columnas.")
     st.write("- Se valida el orden exacto de las columnas.")
-    st.write("- Si un archivo no cumple, se reporta antes de combinar.")
+    st.write("- Si un archivo no cumple, se reporta el motivo exacto antes de combinar.")
 
 col1, col2, col3 = st.columns([1, 1, 1])
 with col1:
@@ -354,6 +401,7 @@ if archivos:
         {
             "Archivo": r["archivo"],
             "Válido": "Sí" if r["valido"] else "No",
+            "Motivo": r.get("motivo", ""),
             "Columnas archivo": r["cantidad_archivo"],
             "Columnas esperadas": r["cantidad_esperada"],
             "Mismo orden": "Sí" if r["mismo_orden"] else "No",
@@ -369,17 +417,30 @@ if archivos:
         st.markdown("### Archivos con problemas")
         for r in invalidos:
             with st.expander(f"❌ {r['archivo']}"):
+                st.error(f"Motivo exacto: {r.get('motivo', 'No identificado')}")
                 if r["error"]:
                     st.error(r["error"])
+
                 if r["faltantes"]:
                     st.write("**Columnas faltantes**")
-                    st.dataframe(pd.DataFrame({"Faltantes": r["faltantes"]}), use_container_width=True)
+                    st.dataframe(
+                        pd.DataFrame({"Faltantes": r["faltantes"]}),
+                        use_container_width=True
+                    )
+
                 if r["extras"]:
                     st.write("**Columnas extra**")
-                    st.dataframe(pd.DataFrame({"Extras": r["extras"]}), use_container_width=True)
+                    st.dataframe(
+                        pd.DataFrame({"Extras": r["extras"]}),
+                        use_container_width=True
+                    )
+
                 if r["diferencias_orden"]:
                     st.write("**Diferencias de orden**")
-                    st.dataframe(pd.DataFrame(r["diferencias_orden"]), use_container_width=True)
+                    st.dataframe(
+                        pd.DataFrame(r["diferencias_orden"]),
+                        use_container_width=True
+                    )
     else:
         st.success("Todos los archivos cumplen con la estructura esperada.")
 
